@@ -20,6 +20,7 @@ import (
 	_ "github.com/miekg/coredns/middleware/loadbalance"
 	_ "github.com/miekg/coredns/middleware/log"
 	_ "github.com/miekg/coredns/middleware/metrics"
+	_ "github.com/miekg/coredns/middleware/policy"
 	_ "github.com/miekg/coredns/middleware/pprof"
 	_ "github.com/miekg/coredns/middleware/proxy"
 	_ "github.com/miekg/coredns/middleware/rewrite"

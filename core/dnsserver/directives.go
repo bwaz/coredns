@@ -81,6 +81,7 @@ var directives = []string{
 	"prometheus",
 	"errors",
 	"log",
+	"policy",
 	"chaos",
 	"cache",
 
