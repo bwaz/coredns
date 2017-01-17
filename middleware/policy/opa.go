@@ -43,6 +43,7 @@ func NewClient(opa string) *OPAClientType {
 	return &OPAClientType{opa, c}
 }
 func (c *OPAClientType) OPAValidate(req ibp.Request) (OPAResultType, error) {
+	start := time.Now()
 	result := OPAResultType{Effect: "DENY", Redirect_to: ""} // By default return DENY
 
 	httpRequest, err := http.NewRequest("GET", "http://"+c.opaAddrPort+"/v1/data/opa/example/", nil)
@@ -59,19 +60,10 @@ func (c *OPAClientType) OPAValidate(req ibp.Request) (OPAResultType, error) {
 	httpResponse, err := c.client.Do(httpRequest)
 	defer httpResponse.Body.Close()
 
+	var resp OPAResponse
 	if err == nil {
-
-		var resp OPAResponse
 		decoder := json.NewDecoder(httpResponse.Body)
 		decoder.Decode(&resp)
-
-		log.WithFields(log.Fields{
-			"request":       req,
-			"response":      resp,
-			"url_raw_query": httpRequest.URL.RawQuery,
-			"url_path":      httpRequest.URL.Path,
-			"url_host":      httpRequest.URL.Host,
-		}).Info("OPAValidate")
 
 		result.Effect = resp.Effect
 		result.Redirect_to = resp.RedirectTo
@@ -80,6 +72,16 @@ func (c *OPAClientType) OPAValidate(req ibp.Request) (OPAResultType, error) {
 		log.WithField("error", err).Error("Failed to get response")
 		return result, err
 	}
+
+	elapsed := time.Since(start)
+
+	log.WithFields(log.Fields{
+		"request":       req,
+		"response":      resp,
+		"url_raw_query": httpRequest.URL.RawQuery,
+		"url_path":      httpRequest.URL.Path,
+		"url_host":      httpRequest.URL.Host,
+	}).Info("OPAValidate ", elapsed)
 
 	return result, err
 }
