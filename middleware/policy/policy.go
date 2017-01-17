@@ -20,35 +20,41 @@ import (
 
 const (
 	EDNS0_MAP_DATA_TYPE_BYTES = iota
-	EDNS0_MAP_DATA_TYPE_HEX = iota
-	EDNS0_MAP_DATA_TYPE_IP = iota
+	EDNS0_MAP_DATA_TYPE_HEX   = iota
+	EDNS0_MAP_DATA_TYPE_IP    = iota
 )
 
 var stringToEDNS0MapType = map[string]uint16{
-	"bytes": EDNS0_MAP_DATA_TYPE_BYTES,
-	"hex": EDNS0_MAP_DATA_TYPE_HEX,
+	"bytes":   EDNS0_MAP_DATA_TYPE_BYTES,
+	"hex":     EDNS0_MAP_DATA_TYPE_HEX,
 	"address": EDNS0_MAP_DATA_TYPE_IP,
 }
 
 type edns0Map struct {
-	code	uint16
-	name	string
+	code     uint16
+	name     string
 	dataType uint16
 	destType string
 }
 
 type PolicyMiddleware struct {
-	Endpoint	string
-	Zones           []string
-	EDNS0Map	[]edns0Map
-	Timeout		time.Duration
-	Next		middleware.Handler
-	pdp		*pep.ClientType
-	ErrorFunc func(dns.ResponseWriter, *dns.Msg, int) // failover error handler
+	Endpoint   string
+	EngineType string
+	Zones      []string
+	EDNS0Map   []edns0Map
+	Timeout    time.Duration
+	Next       middleware.Handler
+	pdp        *pep.ClientType
+	opa        *OPAClientType
+	ErrorFunc  func(dns.ResponseWriter, *dns.Msg, int) // failover error handler
 }
 
-
 func (p *PolicyMiddleware) Connect() error {
+	if p.EngineType == "opa" {
+		p.opa = NewClient(p.Endpoint)
+		return nil
+	}
+
 	log.Printf("[DEBUG] Connecting %v", p)
 	p.pdp = pep.NewClient(p.Endpoint)
 	return p.pdp.Connect(p.Timeout)
@@ -96,7 +102,7 @@ func (p *PolicyMiddleware) getEDNS0Attrs(r *dns.Msg) ([]*ibp.Attribute, bool) {
 						value = ip.String()
 					}
 					foundSourceIP = foundSourceIP || (m.name == "source_ip")
-					attrs = append(attrs,&ibp.Attribute{Id: m.name, Type: m.destType, Value: value})
+					attrs = append(attrs, &ibp.Attribute{Id: m.name, Type: m.destType, Value: value})
 					break
 				}
 			}
@@ -112,7 +118,7 @@ func (p *PolicyMiddleware) ServeDNS(ctx context.Context, w dns.ResponseWriter, r
 	var attrs []*ibp.Attribute
 	if len(r.Question) > 0 {
 		q := r.Question[0]
-		attrs = append(attrs, &ibp.Attribute{Id: "domain_name", Type: "domain", Value: strings.TrimRight(q.Name,".")})
+		attrs = append(attrs, &ibp.Attribute{Id: "domain_name", Type: "domain", Value: strings.TrimRight(q.Name, ".")})
 		//attrs = append(attrs, &ibp.Attribute{Id: "dns_qtype", Type: "string", Value: dns.TypeToString[q.Qtype]})
 	}
 
@@ -127,7 +133,16 @@ func (p *PolicyMiddleware) ServeDNS(ctx context.Context, w dns.ResponseWriter, r
 		attrs = append(attrs, &ibp.Attribute{Id: "source_ip", Type: "address", Value: state.IP()})
 	}
 
-	result, err := p.pdp.Validate(ibp.Request{Attributes: attrs})
+	var err error
+	var result pep.ResultType
+	if p.pdp == nil {
+		oparesult, e := p.opa.OPAValidate(ibp.Request{Attributes: attrs})
+		result.Effect = oparesult.Effect
+		result.Redirect_to = oparesult.Redirect_to
+		err = e
+	} else {
+		result, err = p.pdp.Validate(ibp.Request{Attributes: attrs})
+	}
 	if err != nil {
 		log.Printf("[ERROR] Policy validation failed due to error %s\n", err)
 		return dns.RcodeServerFailure, err
@@ -135,12 +150,12 @@ func (p *PolicyMiddleware) ServeDNS(ctx context.Context, w dns.ResponseWriter, r
 
 	rcode := dns.RcodeRefused
 	switch result.Effect {
-		case "PERMIT":
-			rcode, err = p.Next.ServeDNS(ctx, w, r)
-		case "DENY":
-			if (result.Redirect_to != "") {
-				return p.redirect(result.Redirect_to, w, r)
-			}
+	case "PERMIT":
+		rcode, err = p.Next.ServeDNS(ctx, w, r)
+	case "DENY":
+		if result.Redirect_to != "" {
+			return p.redirect(result.Redirect_to, w, r)
+		}
 	}
 
 	return rcode, err
@@ -150,30 +165,30 @@ func (p *PolicyMiddleware) ServeDNS(ctx context.Context, w dns.ResponseWriter, r
 func (p *PolicyMiddleware) Name() string { return "policy" }
 
 func (p *PolicyMiddleware) redirect(redirect_to string, w dns.ResponseWriter, r *dns.Msg) (int, error) {
-        state := request.Request{W: w, Req: r}
+	state := request.Request{W: w, Req: r}
 
-        a := new(dns.Msg)
-        a.SetReply(r)
-        a.Compress = true
-        a.Authoritative = true
+	a := new(dns.Msg)
+	a.SetReply(r)
+	a.Compress = true
+	a.Authoritative = true
 
-        var rr dns.RR
+	var rr dns.RR
 
-        switch state.Family() {
-        case 1:
-                rr = new(dns.A)
-                rr.(*dns.A).Hdr = dns.RR_Header{Name: state.QName(), Rrtype: dns.TypeA, Class: state.QClass()}
-                rr.(*dns.A).A = net.ParseIP(redirect_to).To4()
-        case 2:
-                rr = new(dns.AAAA)
-                rr.(*dns.AAAA).Hdr = dns.RR_Header{Name: state.QName(), Rrtype: dns.TypeAAAA, Class: state.QClass()}
-                rr.(*dns.AAAA).AAAA = net.ParseIP(redirect_to)
-        }
+	switch state.Family() {
+	case 1:
+		rr = new(dns.A)
+		rr.(*dns.A).Hdr = dns.RR_Header{Name: state.QName(), Rrtype: dns.TypeA, Class: state.QClass()}
+		rr.(*dns.A).A = net.ParseIP(redirect_to).To4()
+	case 2:
+		rr = new(dns.AAAA)
+		rr.(*dns.AAAA).Hdr = dns.RR_Header{Name: state.QName(), Rrtype: dns.TypeAAAA, Class: state.QClass()}
+		rr.(*dns.AAAA).AAAA = net.ParseIP(redirect_to)
+	}
 
-        a.Answer = []dns.RR{rr}
+	a.Answer = []dns.RR{rr}
 
-        state.SizeAndDo(a)
-        w.WriteMsg(a)
+	state.SizeAndDo(a)
+	w.WriteMsg(a)
 
-        return 0, nil
+	return 0, nil
 }
