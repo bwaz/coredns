@@ -12,6 +12,8 @@ import (
 
 type OPAResponse struct {
 	DomainName string `json:"dn,omitempty"`
+	SourceIP   string `json:"sip,omitempty"`
+	CustomerID string `json:"cid,omitempty"`
 	Category   string `json:"category,omitempty"`
 	Effect     string `json:"effect,omitempty"`
 	RedirectTo string `json:"redirect_to,omitempty"`
@@ -43,7 +45,7 @@ func NewClient(opa string) *OPAClientType {
 	return &OPAClientType{opa, c}
 }
 func (c *OPAClientType) OPAValidate(req ibp.Request) (OPAResultType, error) {
-	start := time.Now()
+	//start := time.Now()
 	result := OPAResultType{Effect: "DENY", Redirect_to: ""} // By default return DENY
 
 	httpRequest, err := http.NewRequest("GET", "http://"+c.opaAddrPort+"/v1/data/opa/example/", nil)
@@ -58,12 +60,12 @@ func (c *OPAClientType) OPAValidate(req ibp.Request) (OPAResultType, error) {
 	httpRequest.URL.RawQuery = values.Encode()
 
 	httpResponse, err := c.client.Do(httpRequest)
-	defer httpResponse.Body.Close()
 
 	var resp OPAResponse
 	if err == nil {
 		decoder := json.NewDecoder(httpResponse.Body)
 		decoder.Decode(&resp)
+		httpResponse.Body.Close()
 
 		result.Effect = resp.Effect
 		result.Redirect_to = resp.RedirectTo
@@ -73,7 +75,7 @@ func (c *OPAClientType) OPAValidate(req ibp.Request) (OPAResultType, error) {
 		return result, err
 	}
 
-	elapsed := time.Since(start)
+	/*elapsed := time.Since(start)
 
 	log.WithFields(log.Fields{
 		"request":       req,
@@ -81,7 +83,8 @@ func (c *OPAClientType) OPAValidate(req ibp.Request) (OPAResultType, error) {
 		"url_raw_query": httpRequest.URL.RawQuery,
 		"url_path":      httpRequest.URL.Path,
 		"url_host":      httpRequest.URL.Host,
-	}).Info("OPAValidate ", elapsed)
+	}).Debug("OPAValidate ", elapsed)
+	*/
 
 	return result, err
 }
