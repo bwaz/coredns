@@ -136,7 +136,7 @@ func (p *PolicyMiddleware) ServeDNS(ctx context.Context, w dns.ResponseWriter, r
 	var err error
 	var result pep.ResultType
 	if p.pdp == nil {
-		oparesult, e := p.opa.OPAValidate(ibp.Request{Attributes: attrs})
+		oparesult, e := p.opa.Validate(ibp.Request{Attributes: attrs})
 		result.Effect = oparesult.Effect
 		result.Redirect_to = oparesult.Redirect_to
 		err = e
